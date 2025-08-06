@@ -1,4 +1,4 @@
 {
-  "llm_model": "mattw/huggingfaceh4_zephyr-7b-beta:latest",
-  "embedding_model": "nomic-embed-text:latest"
+  "llm_model": "smollm-360m-instruct-add-basics-q8_0:latest",
+  "embedding_model": "smollm-360m-instruct-add-basics-q8_0:latest"
 }
