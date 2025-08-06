@@ -28,8 +28,11 @@ cd chatpdf-rag-deepseek-r1
 ```bash
 python3 -m venv venv
 source venv/bin/activate
+Windows 
+python -m venv venv
+PS C:\Users\Admin> venv\Scripts\Activate
 ```
-Windows PS C:\Users\Admin> venv\Scripts\Activate
+
 ### 3. Install Dependencies
 
 Install the required Python packages:
