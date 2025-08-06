@@ -1,4 +1,4 @@
-# appAPI.py
+# llm_providers.py
 import os
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -47,30 +47,3 @@ def get_llm_from_provider():
     
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
-
-def main():
-    """
-    Main function to test the configured LLM provider.
-    """
-    print("Testing the configured LLM provider...")
-    
-    try:
-        llm = get_llm_from_provider()
-        
-        # Use a generic question for testing
-        question = "What are the three most important things to know about AI?"
-        print(f"\nSending question to {os.getenv('LLM_PROVIDER')}: '{question}'")
-        
-        response = llm.invoke(question)
-        
-        print("\nResponse:")
-        print(response.content)
-        
-    except ValueError as e:
-        print(f"\nConfiguration Error: {e}")
-    except Exception as e:
-        print(f"\nAn unexpected error occurred: {e}")
-        print("Please check your API keys and model names in the .env file.")
-
-if __name__ == "__main__":
-    main()

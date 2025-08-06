@@ -9,3 +9,5 @@ python-dotenv
 langchain-groq
 langchain-google-genai
 langchain-openai
+unstructured[docx,markdown]
+markdown
