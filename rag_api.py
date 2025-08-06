@@ -14,6 +14,7 @@ import time
 import gc
 import chromadb
 from llm_providers import get_llm_from_provider
+from chat_memory import ChatMemoryManager
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -59,13 +60,19 @@ class ChatPDFApi:
         self.prompt = ChatPromptTemplate.from_template(
             """
             You are a helpful assistant answering questions based on the uploaded document.
-            Context:
+            Use the conversation history to understand the context of the user's question.
+            
+            Conversation History:
+            {chat_history}
+            
+            Context from Documents:
             {context}
             
             Question:
             {question}
             
-            Answer concisely and accurately based on the context.
+            Answer concisely and accurately based on the context and conversation history.
+            If the answer comes from the context, cite the source filename.
             """
         )
         
@@ -73,6 +80,7 @@ class ChatPDFApi:
         self.retriever = None
         self.documents = []
         self.collection_name = "rag_collection_api"
+        self.memory = ChatMemoryManager()
         
         # Initialize a persistent or in-memory ChromaDB client
         # Using an in-memory client to avoid file locking issues on Windows
@@ -239,6 +247,9 @@ class ChatPDFApi:
         if not self.vector_store:
             raise ValueError("No vector store found. Please ingest a document first.")
 
+        # Add user message to memory
+        self.memory.add_user_message(query)
+
         # Create or recreate retriever if needed
         try:
             if not self.retriever:
@@ -263,15 +274,20 @@ class ChatPDFApi:
                     retrieved_docs = backup_retriever.invoke(query)
                 
                 if not retrieved_docs:
-                    return "No relevant context found in the document to answer your question."
+                    response = "No relevant context found in the document to answer your question."
+                    self.memory.add_ai_message(response)
+                    return response, []
 
             logger.info(f"Retrieved {len(retrieved_docs)} documents")
 
-            # Format context
+            # Format context and get chat history
             context = "\n\n".join(doc.page_content for doc in retrieved_docs)
+            chat_history = self.memory.get_memory_context()
+            
             formatted_input = {
                 "context": context,
                 "question": query,
+                "chat_history": chat_history,
             }
 
             # Create chain and generate response
@@ -284,11 +300,24 @@ class ChatPDFApi:
 
             logger.info("Generating response using the external LLM.")
             response = chain.invoke(formatted_input)
-            return response
+            
+            # Add AI response to memory
+            self.memory.add_ai_message(response)
+            
+            # Add source highlighting
+            sources = [doc.metadata.get('source_filename', 'Unknown source') for doc in retrieved_docs]
+            unique_sources = sorted(list(set(sources)))
+            
+            if unique_sources:
+                response += f"\n\n**Sources:**\n- " + "\n- ".join(unique_sources)
+
+            return response, unique_sources
             
         except Exception as e:
             logger.error(f"Error during question answering: {e}")
-            return f"An error occurred while processing your question: {e}"
+            error_message = f"An error occurred while processing your question: {e}"
+            self.memory.add_ai_message(error_message)
+            return error_message, []
 
     def clear(self):
         """
@@ -297,3 +326,4 @@ class ChatPDFApi:
         logger.info("Clearing vector store, retriever, and documents.")
         self._clear_vector_store()
         self.documents = []
+        self.memory.clear_memory()

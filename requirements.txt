@@ -11,3 +11,5 @@ langchain-google-genai
 langchain-openai
 unstructured[docx,markdown]
 markdown
+python-magic
+cchardet
