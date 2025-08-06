@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 from langchain_core.globals import set_verbose, set_debug
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain.schema.output_parser import StrOutputParser
@@ -31,19 +33,14 @@ class ChatPDF:
 
         self.model = ChatOllama(model=llm_model)
         self.embeddings = OllamaEmbeddings(model=embedding_model)
-        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1024, chunk_overlap=100)
-        self.prompt = ChatPromptTemplate.from_template(
-            """
-            You are a helpful assistant answering questions based on the uploaded document.
-            Context:
-            {context}
-            
-            Question:
-            {question}
-            
-            Answer concisely and accurately in three sentences or less.
-            """
-        )
+        chunk_size = config.get("chunk_size", 1024)
+        chunk_overlap = config.get("chunk_overlap", 100)
+        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        
+        with open("prompt.json") as f:
+            prompt_config = json.load(f)
+        prompt_template = prompt_config.get("prompt_template")
+        self.prompt = ChatPromptTemplate.from_template(prompt_template)
         self.vector_store = None
         self.retriever = None
 
@@ -103,5 +100,16 @@ class ChatPDF:
         Reset the vector store and retriever.
         """
         logger.info("Clearing vector store and retriever.")
+        if self.vector_store:
+            del self.vector_store
+        if self.retriever:
+            del self.retriever
         self.vector_store = None
         self.retriever = None
+        if os.path.exists("chroma_db"):
+            try:
+                shutil.rmtree("chroma_db")
+                logger.info("Chroma DB cleared.")
+            except PermissionError as e:
+                logger.error(f"Failed to clear Chroma DB: {e}. This often happens on Windows if files are still in use. Please restart the application if the issue persists.")
+                # In a real Streamlit app, you might want to display this error to the user via st.error

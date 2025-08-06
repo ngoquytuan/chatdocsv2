@@ -1,4 +1,6 @@
 {
-  "llm_model": "smollm-360m-instruct-add-basics-q8_0:latest",
-  "embedding_model": "smollm-360m-instruct-add-basics-q8_0:latest"
+  "llm_model": "deepseek-r1:latest",
+  "embedding_model": "mxbai-embed-large:latest",
+  "chunk_size": 1024,
+  "chunk_overlap": 100
 }

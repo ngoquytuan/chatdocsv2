@@ -62,6 +62,7 @@ pip install -r requirements.txt
 ```bash
 streamlit run app_api_main.py
 ```
+pip install streamlit
 
 ### 2. Tải lên tài liệu
 
