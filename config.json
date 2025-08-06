@@ -1,0 +1,4 @@
+{
+  "llm_model": "mattw/huggingfaceh4_zephyr-7b-beta:latest",
+  "embedding_model": "mxbai-embed-large:latest"
+}
