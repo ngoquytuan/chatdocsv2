@@ -5,9 +5,10 @@ import time
 import streamlit as st
 from streamlit_chat import message
 from rag import ChatPDF
+from rag_sentence_transformer import ChatPDFSentenceTransformer
+import json
 
 st.set_page_config(page_title="RAG with Local DeepSeek R1")
-
 
 def display_messages():
     """Display the chat history."""
@@ -15,7 +16,6 @@ def display_messages():
     for i, (msg, is_user) in enumerate(st.session_state["messages"]):
         message(msg, is_user=is_user, key=str(i))
     st.session_state["thinking_spinner"] = st.empty()
-
 
 def process_input():
     """Process the user input and generate an assistant response."""
@@ -33,7 +33,6 @@ def process_input():
 
         st.session_state["messages"].append((user_text, True))
         st.session_state["messages"].append((agent_text, False))
-
 
 def read_and_save_file():
     """Handle file upload and ingestion."""
@@ -56,12 +55,20 @@ def read_and_save_file():
         )
         os.remove(file_path)
 
-
 def page():
     """Main app page layout."""
     if len(st.session_state) == 0:
+        # Load pipeline configuration
+        with open("config.json") as f:
+            config = json.load(f)
+        pipeline = config.get("pipeline", "ollama")
+        
+        # Initialize the appropriate assistant based on pipeline
+        if pipeline == "sentence_transformer":
+            st.session_state["assistant"] = ChatPDFSentenceTransformer()
+        else:
+            st.session_state["assistant"] = ChatPDF()
         st.session_state["messages"] = []
-        st.session_state["assistant"] = ChatPDF()
 
     st.header("RAG with Local DeepSeek R1")
 
@@ -94,7 +101,6 @@ def page():
     if st.button("Clear Chat"):
         st.session_state["messages"] = []
         st.session_state["assistant"].clear()
-
 
 if __name__ == "__main__":
     page()

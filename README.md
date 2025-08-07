@@ -192,3 +192,272 @@ streamlit run app_api_main.py
 ├── requirements.txt        # Python dependencies
 ├── .env                    # Stores API keys (created from .env.example)
 └── README.md               # Project documentation
+
+
+
+Tôi sẽ giúp bạn tạo file `rag_sentence_transformer.py` và cập nhật các file `config.json` và `app.py` để hỗ trợ chọn pipeline thông qua cấu hình. Dưới đây là các file được sửa đổi và tạo mới, với các thay đổi như sau:
+
+1. **Cập nhật `config.json`**: Thêm trường `sentence_transformer_model` để chỉ định mô hình SentenceTransformer và trường `pipeline` để chọn pipeline (`ollama` hoặc `sentence_transformer`).
+2. **Tạo `rag_sentence_transformer.py`**: Tạo một lớp `ChatPDFSentenceTransformer` dựa trên `rag.py`, sử dụng `SentenceTransformerEmbeddings` thay vì `OllamaEmbeddings`.
+3. **Cập nhật `app.py`**: Thêm logic để chọn giữa `ChatPDF` và `ChatPDFSentenceTransformer` dựa trên trường `pipeline` trong `config.json`.
+
+Dưới đây là các file:
+
+<xaiArtifact artifact_id="54c03587-bf2b-4b8d-964f-5db7c1f1cd4e" artifact_version_id="7f76e450-0a20-4ed9-9cac-117abdb41bc7" title="config.json" contentType="application/json">
+{
+  "llm_model": "deepseek-r1:latest",
+  "embedding_model": "mxbai-embed-large:latest",
+  "sentence_transformer_model": "all-MiniLM-L6-v2",
+  "pipeline": "ollama",
+  "chunk_size": 1024,
+  "chunk_overlap": 100
+}
+</xaiArtifact>
+
+<xaiArtifact artifact_id="b2269551-a382-47fa-b7fb-113ffba06ef5" artifact_version_id="82416653-3c48-4d88-8b00-2f9287fbb9a5" title="rag_sentence_transformer.py" contentType="text/python">
+import json
+import os
+import shutil
+from langchain_core.globals import set_verbose, set_debug
+from langchain_ollama import ChatOllama
+from langchain_community.embeddings import SentenceTransformerEmbeddings
+from langchain.schema.output_parser import StrOutputParser
+from langchain_community.vectorstores import Chroma
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.schema.runnable import RunnablePassthrough
+from langchain_community.vectorstores.utils import filter_complex_metadata
+from langchain_core.prompts import ChatPromptTemplate
+import logging
+
+set_debug(True)
+set_verbose(True)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class ChatPDFSentenceTransformer:
+    """A class for handling PDF ingestion and question answering using RAG with SentenceTransformer."""
+
+    def __init__(self):
+        """
+        Initialize the ChatPDF instance with an LLM and SentenceTransformer embedding model from config.json.
+        """
+        with open("config.json") as f:
+            config = json.load(f)
+        llm_model = config.get("llm_model")
+        embedding_model = config.get("sentence_transformer_model")
+
+        self.model = ChatOllama(model=llm_model)
+        self.embeddings = SentenceTransformerEmbeddings(model_name=embedding_model)
+        chunk_size = config.get("chunk_size", 1024)
+        chunk_overlap = config.get("chunk_overlap", 100)
+        self.text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        
+        with open("prompt.json") as f:
+            prompt_config = json.load(f)
+        prompt_template = prompt_config.get("prompt_template")
+        self.prompt = ChatPromptTemplate.from_template(prompt_template)
+        self.vector_store = None
+        self.retriever = None
+
+    def ingest(self, pdf_file_path: str):
+        """
+        Ingest a PDF file, split its contents, and store the embeddings in the vector store.
+        """
+        logger.info(f"Starting ingestion for file: {pdf_file_path}")
+        docs = PyPDFLoader(file_path=pdf_file_path).load()
+        chunks = self.text_splitter.split_documents(docs)
+        chunks = filter_complex_metadata(chunks)
+
+        self.vector_store = Chroma.from_documents(
+            documents=chunks,
+            embedding=self.embeddings,
+            persist_directory="chroma_db_sentence_transformer",
+        )
+        logger.info("Ingestion completed. Document embeddings stored successfully.")
+
+    def ask(self, query: str, k: int = 5, score_threshold: float = 0.2):
+        """
+        Answer a query using the RAG pipeline.
+        """
+        if not self.vector_store:
+            raise ValueError("No vector store found. Please ingest a document first.")
+
+        if not self.retriever:
+            self.retriever = self.vector_store.as_retriever(
+                search_type="similarity_score_threshold",
+                search_kwargs={"k": k, "score_threshold": score_threshold},
+            )
+
+        logger.info(f"Retrieving context for query: {query}")
+        retrieved_docs = self.retriever.invoke(query)
+
+        if not retrieved_docs:
+            return "No relevant context found in the document to answer your question."
+
+        formatted_input = {
+            "context": "\n\n".join(doc.page_content for doc in retrieved_docs),
+            "question": query,
+        }
+
+        # Build the RAG chain
+        chain = (
+            RunnablePassthrough()  # Passes the input as-is
+            | self.prompt           # Formats the input for the LLM
+            | self.model_cont      # Queries the LLM
+            | StrOutputParser()     # Parses the LLM's output
+        )
+
+        logger.info("Generating response using the LLM.")
+        return chain.invoke(formatted_input)
+
+    def clear(self):
+        """
+        Reset the vector store and retriever.
+        """
+        logger.info("Clearing vector store and retriever.")
+        if self.vector_store:
+            del self.vector_store
+        if self.retriever:
+            del self.retriever
+        self.vector_store = None
+        self.retriever = None
+        if os.path.exists("chroma_db_sentence_transformer"):
+            try:
+                shutil.rmtree("chroma_db_sentence_transformer")
+                logger.info("Chroma DB cleared.")
+            except PermissionError as e:
+                logger.error(f"Failed to clear Chroma DB: {e}. This often happens on Windows if files are still in use. Please restart the application if the issue persists.")
+</xaiArtifact>
+
+<xaiArtifact artifact_id="36314521-edc2-4238-920a-9eb62b9a53ec" artifact_version_id="eed9eaa4-6c75-40fa-979f-fd8628cbe2fb" title="app.py" contentType="text/python">
+import os
+import tempfile
+import time
+import streamlit as st
+from streamlit_chat import message
+from rag import ChatPDF
+from rag_sentence_transformer import ChatPDFSentenceTransformer
+import json
+
+st.set_page_config(page_title="RAG with Local DeepSeek R1")
+
+def display_messages():
+    """Display the chat history."""
+    st.subheader("Chat History")
+    for i, (msg, is_user) in enumerate(st.session_state["messages"]):
+        message(msg, is_user=is_user, key=str(i))
+    st.session_state["thinking_spinner"] = st.empty()
+
+def process_input():
+    """Process the user input and generate an assistant response."""
+    if st.session_state["user_input"] and len(st.session_state["user_input"].strip()) > 0:
+        user_text = st.session_state["user_input"].strip()
+        with st.session_state["thinking_spinner"], st.spinner("Thinking..."):
+            try:
+                agent_text = st.session_state["assistant"].ask(
+                    user_text,
+                    k=st.session_state["retrieval_k"],
+                    score_threshold=st.session_state["retrieval_threshold"],
+                )
+            except ValueError as e:
+                agent_text = str(e)
+
+        st.session_state["messages"].append((user_text, True))
+        st.session_state["messages"].append((agent_text, False))
+
+def read_and_save_file():
+    """Handle file upload and ingestion."""
+    st.session_state["assistant"].clear()
+    st.session_state["messages"] = []
+    st.session_state["user_input"] = ""
+
+    for file in st.session_state["file_uploader"]:
+        with tempfile.NamedTemporaryFile(delete=False) as tf:
+            tf.write(file.getbuffer())
+            file_path = tf.name
+
+        with st.session_state["ingestion_spinner"], st.spinner(f"Ingesting {file.name}..."):
+            t0 = time.time()
+            st.session_state["assistant"].ingest(file_path)
+            t1 = time.time()
+
+        st.session_state["messages"].append(
+            (f"Ingested {file.name} in {t1 - t0:.2f} seconds", False)
+        )
+        os.remove(file_path)
+
+def page():
+    """Main app page layout."""
+    if len(st.session_state) == 0:
+        # Load pipeline configuration
+        with open("config.json") as f:
+            config = json.load(f)
+        pipeline = config.get("pipeline", "ollama")
+        
+        # Initialize the appropriate assistant based on pipeline
+        if pipeline == "sentence_transformer":
+            st.session_state["assistant"] = ChatPDFSentenceTransformer()
+        else:
+            st.session_state["assistant"] = ChatPDF()
+        st.session_state["messages"] = []
+
+    st.header("RAG with Local DeepSeek R1")
+
+    st.subheader("Upload a Document")
+    st.file_uploader(
+        "Upload a PDF document",
+        type=["pdf"],
+        key="file_uploader",
+        on_change=read_and_save_file,
+        label_visibility="collapsed",
+        accept_multiple_files=True,
+    )
+
+    st.session_state["ingestion_spinner"] = st.empty()
+
+    # Retrieval settings
+    st.subheader("Settings")
+    st.session_state["retrieval_k"] = st.slider(
+        "Number of Retrieved Results (k)", min_value=1, max_value=10, value=5
+    )
+    st.session_state["retrieval_threshold"] = st.slider(
+        "Similarity Score Threshold", min_value=0.0, max_value=1.0, value=0.2, step=0.05
+    )
+
+    # Display messages and text input
+    display_messages()
+    st.text_input("Message", key="user_input", on_change=process_input)
+
+    # Clear chat
+    if st.button("Clear Chat"):
+        st.session_state["messages"] = []
+        st.session_state["assistant"].clear()
+
+if __name__ == "__main__":
+    page()
+</xaiArtifact>
+
+### Giải thích ngắn gọn:
+1. **`config.json`**:
+   - Thêm `sentence_transformer_model` với giá trị mặc định là `all-MiniLM-L6-v2` (mô hình nhẹ, phổ biến của SentenceTransformer).
+   - Thêm `pipeline` để chọn giữa `ollama` và `sentence_transformer`. Mặc định là `ollama` để giữ tương thích với code gốc.
+
+2. **`rag_sentence_transformer.py`**:
+   - Tạo lớp `ChatPDFSentenceTransformer` dựa trên `rag.py`, nhưng sử dụng `SentenceTransformerEmbeddings`.
+   - Sử dụng thư mục `chroma_db_sentence_transformer` để tránh xung đột với `chroma_db` của pipeline Ollama.
+   - Giữ nguyên logic của `ingest`, `ask`, và `clear`, chỉ thay đổi phần embedding và tên thư mục lưu trữ.
+
+3. **`app.py`**:
+   - Thêm import `ChatPDFSentenceTransformer` từ `rag_sentence_transformer`.
+   - Trong hàm `page()`, đọc `pipeline` từ `config.json` và khởi tạo `ChatPDF` hoặc `ChatPDFSentenceTransformer` tương ứng.
+   - Phần còn lại của `app.py` không thay đổi, vì cả hai lớp đều có cùng interface (`ingest`, `ask`, `clear`).
+
+### Lưu ý:
+- Đảm bảo cài đặt thư viện `sentence-transformers` (`pip install sentence-transformers`).
+- File `prompt.json` được giả định là đã tồn tại và không cần thay đổi.
+- Bạn có thể thay đổi `sentence_transformer_model` trong `config.json` (ví dụ: `paraphrase-mpnet-base-v2` cho chất lượng tốt hơn nhưng nặng hơn).
+- Để sử dụng pipeline SentenceTransformer, chỉnh `pipeline` trong `config.json` thành `sentence_transformer`.
+
+Nếu bạn cần thêm chỉnh sửa hoặc giải thích chi tiết hơn, hãy cho tôi biết!

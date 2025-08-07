@@ -1,6 +1,8 @@
 {
   "llm_model": "deepseek-r1:latest",
   "embedding_model": "mxbai-embed-large:latest",
+  "sentence_transformer_model": "AITeamVN/Vietnamese_Embedding",
+  "pipeline": "sentence_transformer",
   "chunk_size": 1024,
   "chunk_overlap": 100
 }
